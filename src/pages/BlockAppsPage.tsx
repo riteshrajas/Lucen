@@ -15,6 +15,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Slider } from '@/components/ui/slider';
 import supabase from '@/lib/supabaseClient';
+import { invoke } from '@tauri-apps/api/core';
 
 interface DetectedApp {
   id: string;
@@ -28,6 +29,17 @@ interface DetectedApp {
   isActive: boolean;
   lastUsed: string;
   user_id: string;
+}
+
+interface InstalledApp {
+  name: string;
+  display_name: string;
+  path: string | null;
+  version: string | null;
+  publisher: string | null;
+  install_date: string | null;
+  icon_path: string | null;
+  category: string;
 }
 
 interface AppCategory {
@@ -47,16 +59,15 @@ const BlockAppsPage = () => {
   const [scanning, setScanning] = useState(false);
   const [user, setUser] = useState<any>(null);
 
-  // Mock categories with Gemini AI categorization
+  // Categories that match the Rust categorization
   const defaultCategories: AppCategory[] = [
-    { name: 'Education', color: 'bg-blue-500', icon: '📚', isBlocked: false, totalApps: 0 },
-    { name: 'Internet', color: 'bg-green-500', icon: '🌐', isBlocked: false, totalApps: 0 },
-    { name: 'Entertainment', color: 'bg-purple-500', icon: '🎮', isBlocked: true, totalApps: 0 },
-    { name: 'Social Media', color: 'bg-pink-500', icon: '📱', isBlocked: true, totalApps: 0 },
-    { name: 'Productivity', color: 'bg-orange-500', icon: '💼', isBlocked: false, totalApps: 0 },
+    { name: 'Gaming', color: 'bg-red-500', icon: '🎮', isBlocked: true, totalApps: 0 },
+    { name: 'Communication', color: 'bg-blue-500', icon: '💬', isBlocked: false, totalApps: 0 },
+    { name: 'Entertainment', color: 'bg-purple-500', icon: '�', isBlocked: true, totalApps: 0 },
+    { name: 'Web Browser', color: 'bg-green-500', icon: '🌐', isBlocked: false, totalApps: 0 },
     { name: 'Development', color: 'bg-gray-500', icon: '⚡', isBlocked: false, totalApps: 0 },
-    { name: 'Creative', color: 'bg-red-500', icon: '🎨', isBlocked: false, totalApps: 0 },
-    { name: 'Communication', color: 'bg-yellow-500', icon: '💬', isBlocked: false, totalApps: 0 },
+    { name: 'Productivity', color: 'bg-orange-500', icon: '💼', isBlocked: false, totalApps: 0 },
+    { name: 'Other', color: 'bg-slate-500', icon: '�', isBlocked: false, totalApps: 0 },
   ];
 
   // Mock detected apps (would come from system detection)
@@ -136,29 +147,84 @@ const BlockAppsPage = () => {
   }, []);
 
   const loadApps = async () => {
-    // In a real app, this would detect installed apps and categorize them with Gemini AI
-    setApps(mockApps);
-    
-    // Update categories with app counts
-    const updatedCategories = defaultCategories.map(category => ({
-      ...category,
-      totalApps: mockApps.filter(app => app.category === category.name).length
-    }));
-    
-    setCategories(updatedCategories);
+    setScanning(true);
+    try {
+      console.log('Fetching installed apps from Rust backend...');
+      
+      // Get installed apps from Rust
+      const installedApps: InstalledApp[] = await invoke('get_installed_apps');
+      console.log(`Found ${installedApps.length} installed applications`);
+      
+      // Convert to DetectedApp format
+      const detectedApps: DetectedApp[] = installedApps.map((app, index) => ({
+        id: `app_${index}`,
+        name: app.display_name,
+        category: app.category,
+        icon: app.icon_path || undefined,
+        path: app.path || '',
+        usageTime: 0, // Default values - would be tracked over time
+        allowedTime: 480, // 8 hours default
+        isBlocked: getDefaultBlockStatus(app.category),
+        isActive: false, // Would be determined by running process check
+        lastUsed: new Date().toISOString(),
+        user_id: user?.id || 'unknown'
+      }));
+      
+      setApps(detectedApps);
+      
+      // Update categories with app counts
+      const categoryMap = new Map<string, number>();
+      detectedApps.forEach(app => {
+        categoryMap.set(app.category, (categoryMap.get(app.category) || 0) + 1);
+      });
+      
+      const updatedCategories = defaultCategories.map(category => ({
+        ...category,
+        totalApps: categoryMap.get(category.name) || 0
+      }));
+      
+      setCategories(updatedCategories);
+      
+    } catch (error) {
+      console.error('Error loading apps:', error);
+      
+      // Fallback to mock data if Rust backend fails
+      setApps(mockApps);
+      const updatedCategories = defaultCategories.map(category => ({
+        ...category,
+        totalApps: mockApps.filter(app => app.category === category.name).length
+      }));
+      setCategories(updatedCategories);
+    } finally {
+      setScanning(false);
+    }
   };
 
-  const scanForApps = async () => {
-    setScanning(true);
-    // Mock scanning process
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // In a real implementation, this would:
-    // 1. Scan system for installed apps
-    // 2. Send app list to Gemini AI for categorization
-    // 3. Update the apps list with new discoveries
-    
-    setScanning(false);
+  const getDefaultBlockStatus = (category: string): boolean => {
+    // Default blocking rules
+    const blockedCategories = ['Gaming', 'Entertainment'];
+    return blockedCategories.includes(category);
+  };
+
+  const scanForRunningApps = async () => {
+    try {
+      console.log('Scanning for running processes...');
+      const runningProcesses: string[] = await invoke('scan_running_processes');
+      console.log('Running processes:', runningProcesses);
+      
+      // Update app states based on running processes
+      setApps(prevApps => 
+        prevApps.map(app => ({
+          ...app,
+          isActive: runningProcesses.some(process => 
+            app.path.toLowerCase().includes(process.toLowerCase()) ||
+            app.name.toLowerCase().includes(process.replace('.exe', '').toLowerCase())
+          )
+        }))
+      );
+    } catch (error) {
+      console.error('Error scanning running processes:', error);
+    }
   };
 
   const toggleAppBlock = async (appId: string) => {
@@ -238,7 +304,15 @@ const BlockAppsPage = () => {
           <div className="flex items-center gap-2">
             <Button 
               variant="outline" 
-              onClick={scanForApps} 
+              onClick={scanForRunningApps} 
+              className="flex items-center gap-2"
+            >
+              <Monitor className="h-4 w-4" />
+              Scan Running
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={loadApps} 
               disabled={scanning}
               className="flex items-center gap-2"
             >
@@ -250,7 +324,7 @@ const BlockAppsPage = () => {
               ) : (
                 <>
                   <Search className="h-4 w-4" />
-                  Scan Apps
+                  Rescan Apps
                 </>
               )}
             </Button>

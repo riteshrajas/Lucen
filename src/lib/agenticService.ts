@@ -1,6 +1,5 @@
 import supabase from './supabaseClient';
 import { createTask, createHabitTask, deleteTask, updateTask, getTasks } from './taskService';
-import { updateFamilyMemberProfile, updateFamilyMemberStatus } from './familyService';
 import { toast } from '@/hooks/use-toast';
 
 // Define the possible action types the AI can perform
@@ -8,7 +7,7 @@ export interface AgenticAction {
   type: 'advice' | 'action';
   content: string;
   action?: {
-    actionType: 'create_task' | 'create_habit' | 'delete_task' | 'update_task' | 'change_theme' | 'CHANGE_THEME' | 'update_profile' | 'delete_family_member' | 'update_family_status' | 'navigate_to_page' | 'export_data' | 'create_diary_entry' | 'update_settings' | 'CREATE_TASK' | 'CREATE_HABIT' | 'DELETE_TASK' | 'UPDATE_TASK' | 'UPDATE_PROFILE' | 'DELETE_FAMILY_MEMBER' | 'UPDATE_FAMILY_STATUS' | 'NAVIGATE_TO_PAGE' | 'EXPORT_DATA' | 'CREATE_DIARY_ENTRY' | 'UPDATE_SETTINGS';
+    actionType: 'create_task' | 'create_habit' | 'delete_task' | 'update_task' | 'change_theme' | 'CHANGE_THEME' | 'update_profile' | 'navigate_to_page' | 'export_data' | 'create_diary_entry' | 'update_settings' | 'start_meditation' | 'CREATE_TASK' | 'CREATE_HABIT' | 'DELETE_TASK' | 'UPDATE_TASK' | 'UPDATE_PROFILE' | 'NAVIGATE_TO_PAGE' | 'EXPORT_DATA' | 'CREATE_DIARY_ENTRY' | 'UPDATE_SETTINGS' | 'START_MEDITATION';
     parameters: any;
     confirmationRequired?: boolean;
     confirmationMessage?: string;
@@ -86,14 +85,6 @@ export class AgenticService {
         case 'UPDATE_PROFILE':
           return await this.updateProfile(action.action.parameters);
         
-        case 'delete_family_member':
-        case 'DELETE_FAMILY_MEMBER':
-          return await this.deleteFamilyMember(action.action.parameters);
-        
-        case 'update_family_status':
-        case 'UPDATE_FAMILY_STATUS':
-          return await this.updateFamilyStatus(action.action.parameters);
-        
         case 'navigate_to_page':
         case 'NAVIGATE_TO_PAGE':
           return await this.navigateToPage(action.action.parameters);
@@ -109,6 +100,10 @@ export class AgenticService {
         case 'update_settings':
         case 'UPDATE_SETTINGS':
           return await this.updateSettings(action.action.parameters);
+        
+        case 'start_meditation':
+        case 'START_MEDITATION':
+          return await this.startMeditation(action.action.parameters);
         
         default:
           return { success: false, message: 'Unknown action type', error: `Action type ${action.action.actionType} not supported` };
@@ -157,13 +152,13 @@ export class AgenticService {
   private async createHabit(params: any): Promise<ActionResult> {
     try {
       const habitData = {
-        title: params.title,
+        title: params.title || params.name,
         description: params.description || '',
         category: params.category || 'General',
         frequency: params.frequency || 'daily',
-        target_count: params.targetCount || 1,
+        target_count: params.targetCount || params.target_count || 1,
         color: params.color || '#8B5CF6',
-        rule_id: params.ruleAlignment || 2
+        rule_id: params.ruleAlignment || params.rule_id || 2
       };
 
       const habit = await createHabitTask(habitData);
@@ -296,41 +291,6 @@ export class AgenticService {
       return { success: false, message: 'Error updating profile', error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
-
-  private async deleteFamilyMember(params: any): Promise<ActionResult> {
-    try {
-      // For now, just remove from local storage or mark as inactive
-      // This would need to be implemented based on your family member system
-      toast({
-        title: 'Family Member Removed',
-        description: 'Family member has been successfully removed',
-      });
-      return { success: true, message: 'Family member deleted successfully' };
-    } catch (error) {
-      return { success: false, message: 'Error deleting family member', error: error instanceof Error ? error.message : 'Unknown error' };
-    }
-  }
-
-  private async updateFamilyStatus(params: any): Promise<ActionResult> {
-    try {
-      const success = await updateFamilyMemberStatus(
-        params.familyMemberId,
-        params.status,
-        params.statusMessage
-      );
-      if (success) {
-        toast({
-          title: 'Status Updated',
-          description: 'Family member status updated successfully',
-        });
-        return { success: true, message: 'Family status updated successfully' };
-      }
-      return { success: false, message: 'Failed to update family status' };
-    } catch (error) {
-      return { success: false, message: 'Error updating family status', error: error instanceof Error ? error.message : 'Unknown error' };
-    }
-  }
-
   private async navigateToPage(params: any): Promise<ActionResult> {
     try {
       const page = params.page || params.pageName || params.route;
@@ -339,14 +299,7 @@ export class AgenticService {
       const pageMapping: { [key: string]: string } = {
         'dashboard': '/dashboard',
         'tasks': '/dashboard',
-        'contacts': '/contacts',
-        'hierarchy': '/hierarchy',
-        'profile': '/profile',
-        'settings': '/dashboard/settings',
-        'diary': '/dashboard/daily-diary',
-        'calendar': '/calendar-timeline',
-        'timeline': '/calendar-timeline',
-        'family': '/family-profile',
+        'blockapps': '/block-apps',
         'login': '/login'
       };
 
@@ -489,6 +442,28 @@ export class AgenticService {
       return { success: true, message: 'Settings updated successfully', data: updates };
     } catch (error) {
       return { success: false, message: 'Error updating settings', error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  private async startMeditation(params: any): Promise<ActionResult> {
+    try {
+      // This would integrate with the dashboard meditation system
+      // For now, we'll just dispatch a custom event that the dashboard can listen to
+      if (typeof window !== 'undefined') {
+        const meditationEvent = new CustomEvent('start-meditation', {
+          detail: { 
+            todoItemId: params.todoItemId || params.taskId || params.habitId,
+            meditationType: params.type || 'focus',
+            duration: params.duration || null
+          }
+        });
+        window.dispatchEvent(meditationEvent);
+        
+        return { success: true, message: 'Meditation session started' };
+      }
+      return { success: false, message: 'Meditation not available' };
+    } catch (error) {
+      return { success: false, message: 'Error starting meditation', error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 
